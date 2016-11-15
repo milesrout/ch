@@ -1,4 +1,4 @@
-use lexer::Token;
+use lexer::{TokenType, Token};
 
 use std;
 
@@ -54,8 +54,13 @@ pub struct Parser<I: Iterator<Item=Token>> {
     current_token: Token,
 }
 
-static COMP_OPS: &'static [&'static str] = &[
-    "eq", "ne", "le", "ge", "lt", "gt",
+static COMP_OPS: [TokenType; 6] = [
+    TokenType::Eq,
+    TokenType::Ne,
+    TokenType::Lt,
+    TokenType::Gt,
+    TokenType::Le,
+    TokenType::Ge,
 ];
 
 impl<I: Iterator<Item=Token>> Parser<I> {
@@ -74,7 +79,7 @@ impl<I: Iterator<Item=Token>> Parser<I> {
     fn next_token(&mut self) {
         self.current_token = match self.tokens.next() {
             Some(t) => t,
-            None => Token::new("EOF".to_string(), "".to_string()),
+            None => Token::new(TokenType::Eof, String::new()),
         }
     }
 
@@ -90,7 +95,7 @@ impl<I: Iterator<Item=Token>> Parser<I> {
 
     fn statements(&mut self) -> Stmt {
         let mut v = vec![];
-        while self.lookahead().name != "EOF" {
+        while self.lookahead().name != TokenType::Eof {
             v.push(self.statement());
         }
         if v.len() == 1 {
@@ -101,32 +106,32 @@ impl<I: Iterator<Item=Token>> Parser<I> {
     }
 
     fn statement(&mut self) -> Stmt {
-        match self.lookahead().name.as_str() {
-            "fn" => self.fn_statement(),
-            "let" => self.let_statement(),
-            "return" => self.return_statement(),
+        match self.lookahead().name {
+            TokenType::Fn => self.fn_statement(),
+            TokenType::Let => self.let_statement(),
+            TokenType::Return => self.return_statement(),
             _ => self.expr_statement(),
         }
     }
 
     fn fn_statement(&mut self) -> Stmt {
-        assert_eq!(self.get_token().name, "fn");
-        assert_eq!(self.lookahead().name, "ident");
+        assert_eq!(self.get_token().name, TokenType::Fn);
+        assert_eq!(self.lookahead().name, TokenType::Ident);
         let name = self.lookahead().string;
         self.next_token();
-        assert_eq!(self.get_token().name, "lbrack");
+        assert_eq!(self.get_token().name, TokenType::LBrack);
         let params = self.param_list();
-        assert_eq!(self.get_token().name, "rbrack");
-        assert_eq!(self.get_token().name, "arrow");
-        assert_eq!(self.lookahead().name, "ident");
+        assert_eq!(self.get_token().name, TokenType::RBrack);
+        assert_eq!(self.get_token().name, TokenType::Arrow);
+        assert_eq!(self.lookahead().name, TokenType::Ident);
         let returns = self.lookahead().string;
         self.next_token();
-        assert_eq!(self.get_token().name, "lcurly");
+        assert_eq!(self.get_token().name, TokenType::LCurly);
         let mut body = vec![];
-        while self.lookahead().name != "rcurly" {
+        while self.lookahead().name != TokenType::RCurly {
             body.push(self.statement());
         }
-        assert_eq!(self.get_token().name, "rcurly");
+        assert_eq!(self.get_token().name, TokenType::RCurly);
         Stmt::Fn {
             name: name,
             params: params,
@@ -137,30 +142,30 @@ impl<I: Iterator<Item=Token>> Parser<I> {
 
     fn param_list(&mut self) -> Vec<Param> {
         let mut params = vec![];
-        while self.lookahead().name != "rbrack" {
+        while self.lookahead().name != TokenType::RBrack {
             params.push(self.parameter());
         }
         params
     }
 
     fn parameter(&mut self) -> Param {
-        assert_eq!(self.lookahead().name, "ident");
+        assert_eq!(self.lookahead().name, TokenType::Ident);
         let name = self.get_token().string;
-        assert_eq!(self.get_token().name, "colon");
-        assert_eq!(self.lookahead().name, "ident");
+        assert_eq!(self.get_token().name, TokenType::Colon);
+        assert_eq!(self.lookahead().name, TokenType::Ident);
         let typ = self.get_token().string;
         Param { name: name, typ: Type::from_string(typ) }
     }
 
     fn let_statement(&mut self) -> Stmt {
-        assert_eq!(self.get_token().name, "let");
+        assert_eq!(self.get_token().name, TokenType::Let);
         let pat = self.pattern();
-        assert_eq!(self.get_token().name, "colon");
-        assert_eq!(self.lookahead().name, "ident");
+        assert_eq!(self.get_token().name, TokenType::Colon);
+        assert_eq!(self.lookahead().name, TokenType::Ident);
         let typ = self.get_token().string;
-        assert_eq!(self.get_token().name, "equal");
+        assert_eq!(self.get_token().name, TokenType::Equal);
         let expr = self.expression();
-        assert_eq!(self.get_token().name, "semi");
+        assert_eq!(self.get_token().name, TokenType::Semi);
         Stmt::Let { 
             pat: pat, 
             typ: Type::from_string(typ), 
@@ -169,29 +174,29 @@ impl<I: Iterator<Item=Token>> Parser<I> {
     }
 
     fn pattern(&mut self) -> String {
-        assert_eq!(self.lookahead().name, "ident");
+        assert_eq!(self.lookahead().name, TokenType::Ident);
         self.get_token().string
     }
 
     fn return_statement(&mut self) -> Stmt {
-        assert_eq!(self.get_token().name, "return");
+        assert_eq!(self.get_token().name, TokenType::Return);
         let stmt = Stmt::Return { expr: self.expression() };
-        assert_eq!(self.get_token().name, "semi");
+        assert_eq!(self.get_token().name, TokenType::Semi);
         stmt
     }
 
     fn expr_statement(&mut self) -> Stmt {
         let expr = self.expression();
-        assert_eq!(self.get_token().name, "semi");
+        assert_eq!(self.get_token().name, TokenType::Semi);
         Stmt::Expr { expr: expr }
     }
 
     fn expression(&mut self) -> Expr {
         let expr = self.or_expr();
-        if self.lookahead().name == "if" {
+        if self.lookahead().name == TokenType::If {
             self.next_token();
             let cond = self.or_expr();
-            assert_eq!(self.get_token().name, "else");
+            assert_eq!(self.get_token().name, TokenType::Else);
             let alt = self.or_expr();
             Expr::IfElse { 
                 expr: Box::new(expr),
@@ -205,9 +210,9 @@ impl<I: Iterator<Item=Token>> Parser<I> {
 
     fn or_expr(&mut self) -> Expr {
         let expr = self.and_expr();
-        if self.lookahead().name == "or" {
+        if self.lookahead().name == TokenType::Or {
             let mut exprs = vec![];
-            while self.lookahead().name == "or" {
+            while self.lookahead().name == TokenType::Or {
                 self.next_token();
                 exprs.push(self.and_expr());
             }
@@ -217,7 +222,7 @@ impl<I: Iterator<Item=Token>> Parser<I> {
         }
     }
 
-    fn op_expr<F>(&mut self, next: fn (&mut Self) -> Expr, token: &str, make_ast_node: F) -> Expr
+    fn op_expr<F>(&mut self, next: fn (&mut Self) -> Expr, token: TokenType, make_ast_node: F) -> Expr
         where F: Fn(Vec<Expr>) -> Expr
     {
         let expr = next(self);
@@ -234,11 +239,11 @@ impl<I: Iterator<Item=Token>> Parser<I> {
     }
 
     fn and_expr(&mut self) -> Expr {
-        self.op_expr(Self::not_expr, "and", |exprs| Expr::LogicalAnd { exprs: exprs })
+        self.op_expr(Self::not_expr, TokenType::And, |exprs| Expr::LogicalAnd { exprs: exprs })
     }
 
     fn not_expr(&mut self) -> Expr {
-        if self.lookahead().name == "not" {
+        if self.lookahead().name == TokenType::Not {
             self.next_token();
             Expr::LogicalNot { expr: Box::new(self.not_expr()) }
         } else {
@@ -248,30 +253,30 @@ impl<I: Iterator<Item=Token>> Parser<I> {
 
     fn comparison(&mut self) -> Expr {
         let expr = self.bitor_expr();
-        while COMP_OPS.contains(&&&*self.lookahead().name) {
+        while COMP_OPS.contains(&self.lookahead().name) {
             unimplemented!();
         }
         expr
     }
 
     fn bitor_expr(&mut self) -> Expr {
-        self.op_expr(Self::bitxor_expr, "bitor", |exprs| Expr::BitOr { exprs: exprs })
+        self.op_expr(Self::bitxor_expr, TokenType::BitOr, |exprs| Expr::BitOr { exprs: exprs })
     }
 
     fn bitxor_expr(&mut self) -> Expr {
-        self.op_expr(Self::bitand_expr, "bitxor", |exprs| Expr::BitXor { exprs: exprs })
+        self.op_expr(Self::bitand_expr, TokenType::BitXor, |exprs| Expr::BitXor { exprs: exprs })
     }
 
     fn bitand_expr(&mut self) -> Expr {
-        self.op_expr(Self::bitshf_expr, "bitand", |exprs| Expr::BitAnd { exprs: exprs })
+        self.op_expr(Self::bitshf_expr, TokenType::BitAnd, |exprs| Expr::BitAnd { exprs: exprs })
     }
 
     fn bitshf_expr(&mut self) -> Expr {
         let expr = self.arith_expr();
-        if self.lookahead().name == "lshift" {
+        if self.lookahead().name == TokenType::LShift {
             self.next_token();
             Expr::LShift { lhs: Box::new(expr), rhs: Box::new(self.bitshf_expr()) }
-        } else if self.lookahead().name == "rshift" {
+        } else if self.lookahead().name == TokenType::RShift {
             self.next_token();
             Expr::RShift { lhs: Box::new(expr), rhs: Box::new(self.bitshf_expr()) }
         } else {
@@ -281,13 +286,13 @@ impl<I: Iterator<Item=Token>> Parser<I> {
 
     fn arith_expr(&mut self) -> Expr {
         let expr = self.term();
-        if self.lookahead().name == "plus" {
+        if self.lookahead().name == TokenType::Plus {
             self.next_token();
             Expr::Plus { 
                 lhs: Box::new(expr), 
                 rhs: Box::new(self.arith_expr())
             }
-        } else if self.lookahead().name == "minus" {
+        } else if self.lookahead().name == TokenType::Minus {
             self.next_token();
             Expr::Minus { 
                 lhs: Box::new(expr), 
@@ -300,19 +305,19 @@ impl<I: Iterator<Item=Token>> Parser<I> {
 
     fn term(&mut self) -> Expr {
         let expr = self.factor();
-        if self.lookahead().name == "times" {
+        if self.lookahead().name == TokenType::Times {
             self.next_token();
             Expr::Times { 
                 lhs: Box::new(expr), 
                 rhs: Box::new(self.arith_expr())
             }
-        } else if self.lookahead().name == "divide" {
+        } else if self.lookahead().name == TokenType::Divide {
             self.next_token();
             Expr::Divide { 
                 lhs: Box::new(expr), 
                 rhs: Box::new(self.arith_expr())
             }
-        } else if self.lookahead().name == "modulus" {
+        } else if self.lookahead().name == TokenType::Modulus {
             self.next_token();
             Expr::Mod { 
                 lhs: Box::new(expr), 
@@ -324,13 +329,13 @@ impl<I: Iterator<Item=Token>> Parser<I> {
     }
 
     fn factor(&mut self) -> Expr {
-        if self.lookahead().name == "plus" {
+        if self.lookahead().name == TokenType::Plus {
             self.next_token();
             Expr::UnaryPlus { expr: Box::new(self.factor()) }
-        } else if self.lookahead().name == "minus" {
+        } else if self.lookahead().name == TokenType::Minus {
             self.next_token();
             Expr::UnaryMinus { expr: Box::new(self.factor()) }
-        } else if self.lookahead().name == "tilde" {
+        } else if self.lookahead().name == TokenType::Tilde {
             self.next_token();
             Expr::UnaryTilde { expr: Box::new(self.factor()) }
         } else {
@@ -340,7 +345,7 @@ impl<I: Iterator<Item=Token>> Parser<I> {
 
     fn power(&mut self) -> Expr {
         let expr = self.atom_expr();
-        if self.lookahead().name == "exp" {
+        if self.lookahead().name == TokenType::Exp {
             Expr::Power { lhs: Box::new(expr), rhs: Box::new(self.factor()) }
         } else {
             expr
@@ -349,9 +354,9 @@ impl<I: Iterator<Item=Token>> Parser<I> {
 
     fn atom_expr(&mut self) -> Expr {
         let expr = self.atom();
-        if self.lookahead().name == "lbrack" {
+        if self.lookahead().name == TokenType::LBrack {
             self.call_or_idx_expr(expr)
-        } else if self.lookahead().name == "lsqbrack" {
+        } else if self.lookahead().name == TokenType::LSqBrack {
             self.call_or_idx_expr(expr)
         } else {
             expr
@@ -359,10 +364,10 @@ impl<I: Iterator<Item=Token>> Parser<I> {
     }
 
     fn call_or_idx_expr(&mut self, expr: Expr) -> Expr {
-        if self.lookahead().name == "lbrack" {
+        if self.lookahead().name == TokenType::LBrack {
             let args = self.call_trailer();
             self.call_or_idx_expr(Expr::Call { expr: Box::new(expr), args: args })
-        } else if self.lookahead().name == "lsqbrack" {
+        } else if self.lookahead().name == TokenType::LSqBrack {
             let subscrs = self.idx_trailer();
             self.call_or_idx_expr(Expr::Idx { expr: Box::new(expr), subscrs: subscrs })
         } else {
@@ -371,25 +376,25 @@ impl<I: Iterator<Item=Token>> Parser<I> {
     }
 
     fn call_trailer(&mut self) -> Vec<Expr> {
-        assert_eq!(self.get_token().name, "lbrack");
+        assert_eq!(self.get_token().name, TokenType::LBrack);
         let mut args = vec![];
-        while self.lookahead().name != "rbrack" {
+        while self.lookahead().name != TokenType::RBrack {
             args.push(self.expression());
-            if self.lookahead().name == "comma" {
+            if self.lookahead().name == TokenType::Comma {
                 self.next_token();
             }
         }
-        assert_eq!(self.get_token().name, "rbrack");
+        assert_eq!(self.get_token().name, TokenType::RBrack);
         args
     }
 
     fn idx_trailer(&mut self) -> Vec<Expr> {
-        assert_eq!(self.get_token().name, "lsqbrack");
+        assert_eq!(self.get_token().name, TokenType::LSqBrack);
         let mut subscrs = vec![];
-        while self.lookahead().name != "rsqbrack" {
+        while self.lookahead().name != TokenType::RSqBrack {
             subscrs.push(self.subscript());
         }
-        assert_eq!(self.get_token().name, "rsqbrack");
+        assert_eq!(self.get_token().name, TokenType::RSqBrack);
         subscrs
     }
 
@@ -398,9 +403,9 @@ impl<I: Iterator<Item=Token>> Parser<I> {
     }
 
     fn atom(&mut self) -> Expr {
-        if self.lookahead().name == "lbrack" {
+        if self.lookahead().name == TokenType::LBrack {
             self.paren_expr()
-        } else if self.lookahead().name == "string" {
+        } else if self.lookahead().name == TokenType::String {
             Expr::String { string: self.get_token().string }
         } else {
             self.ident()
@@ -408,14 +413,14 @@ impl<I: Iterator<Item=Token>> Parser<I> {
     }
 
     fn paren_expr(&mut self) -> Expr {
-        assert_eq!(self.get_token().name, "lbrack");
+        assert_eq!(self.get_token().name, TokenType::LBrack);
         let expr = self.expression();
-        assert_eq!(self.get_token().name, "rbrack");
+        assert_eq!(self.get_token().name, TokenType::RBrack);
         expr
     }
 
     fn ident(&mut self) -> Expr {
-        assert_eq!(self.lookahead().name, "ident");
+        assert_eq!(self.lookahead().name, TokenType::Ident);
         Expr::Ident { name: self.get_token().string }
     }
 }

@@ -4,7 +4,7 @@ extern crate itertools;
 mod lexer;
 mod parser;
 
-use lexer::{Lexer, Token};
+use lexer::{Lexer, Token, TokenType};
 use parser::Parser;
 
 use std::path::Path;
@@ -20,14 +20,14 @@ fn main() {
     let lexer = Lexer::new();
     let tokens = lexer.tokenise(&s);
 
-    for &Token { name: ref n, string: ref s } in &tokens {
-        if n != "wspace" {
-            println!("{:} '{:}'", n, s);
+    for &Token { name: n, string: ref s } in &tokens {
+        if n != TokenType::WSpace {
+            println!("{:?} {:?}", n, s);
         }
     }
 
     let mut parser = Parser::new(tokens.into_iter()
-        .filter(|&Token { name: ref n, .. }| n != "wspace"));
+        .filter(|&Token { name: n, .. }| n != TokenType::WSpace));
 
     println!("{:?}", parser.parse());
 }
