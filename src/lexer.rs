@@ -1,6 +1,6 @@
 use itertools::Itertools;
 use regex::{Regex, Captures, Error as RegexError};
-use std::error::Error;
+use std::error;
 use std::fmt;
 
 #[derive(Debug,Copy,Clone,PartialEq,Eq)]
@@ -28,14 +28,14 @@ pub enum TokenType {
     Times,
     Divide,
     Semi,
-    Equal,
+    Assign,
     Comma,
-    Lt,
-    Gt,
-    Le,
-    Ge,
-    Eq,
-    Ne,
+    LessThan,
+    GreaterThan,
+    LessThanOrEqual,
+    GreaterThanOrEqual,
+    EqualTo,
+    NotEqualTo,
     LShift,
     RShift,
     BitOr,
@@ -75,14 +75,14 @@ impl TokenType {
             TokenType::Times => "times",
             TokenType::Divide => "divide",
             TokenType::Semi => "semi",
-            TokenType::Equal => "equal",
+            TokenType::Assign => "assign",
             TokenType::Comma => "comma",
-            TokenType::Lt => "lt",
-            TokenType::Gt => "gt",
-            TokenType::Le => "le",
-            TokenType::Ge => "ge",
-            TokenType::Eq => "eq",
-            TokenType::Ne => "ne",
+            TokenType::LessThan => "lessthan",
+            TokenType::GreaterThan => "greaterthan",
+            TokenType::LessThanOrEqual => "lessthanorequal",
+            TokenType::GreaterThanOrEqual => "greaterthanorequal",
+            TokenType::EqualTo => "equalto",
+            TokenType::NotEqualTo => "notequalto",
             TokenType::LShift => "lshift",
             TokenType::RShift => "rshift",
             TokenType::BitOr => "bitor",
@@ -122,14 +122,14 @@ impl TokenType {
             "times" => Some(TokenType::Times),
             "divide" => Some(TokenType::Divide),
             "semi" => Some(TokenType::Semi),
-            "equal" => Some(TokenType::Equal),
+            "assign" => Some(TokenType::Assign),
             "comma" => Some(TokenType::Comma),
-            "lt" => Some(TokenType::Lt),
-            "gt" => Some(TokenType::Gt),
-            "le" => Some(TokenType::Le),
-            "ge" => Some(TokenType::Ge),
-            "eq" => Some(TokenType::Eq),
-            "ne" => Some(TokenType::Ne),
+            "lessthan" => Some(TokenType::LessThan),
+            "greaterthan" => Some(TokenType::GreaterThan),
+            "lessthanorequal" => Some(TokenType::LessThanOrEqual),
+            "greaterthanorequal" => Some(TokenType::GreaterThanOrEqual),
+            "equalto" => Some(TokenType::EqualTo),
+            "notequalto" => Some(TokenType::NotEqualTo),
             "lshift" => Some(TokenType::LShift),
             "rshift" => Some(TokenType::RShift),
             "bitor" => Some(TokenType::BitOr),
@@ -169,14 +169,14 @@ impl TokenType {
             TokenType::Times => r"×",
             TokenType::Divide => r"÷",
             TokenType::Semi => r";",
-            TokenType::Equal => r"=",
+            TokenType::Assign => r"=",
             TokenType::Comma => r",",
-            TokenType::Lt => r"<",
-            TokenType::Gt => r">",
-            TokenType::Le => r"<=",
-            TokenType::Ge => r">=",
-            TokenType::Eq => r"==",
-            TokenType::Ne => r"!=",
+            TokenType::LessThan => r"<",
+            TokenType::GreaterThan => r">",
+            TokenType::LessThanOrEqual => r"<=",
+            TokenType::GreaterThanOrEqual => r">=",
+            TokenType::EqualTo => r"==",
+            TokenType::NotEqualTo => r"!=",
             TokenType::LShift => r"<<",
             TokenType::RShift => r">>",
             TokenType::BitOr => r"\|",
@@ -185,7 +185,7 @@ impl TokenType {
             TokenType::Exp => r"\*\*",
             TokenType::String => r#""(\\"|[^"])*""#,
             TokenType::Ident => "[a-zA-Z_][a-zA-Z0-9_]*",
-            TokenType::WSpace => "[ \\n\\r\\t]*",
+            TokenType::WSpace => "[ \\n\\r\\t]+",
             TokenType::Error => ".*?",
             TokenType::Eof => "",
         }
@@ -216,14 +216,14 @@ pub static TOKENS: [TokenType; 41] = [
     TokenType::Times,
     TokenType::Divide,
     TokenType::Semi,
-    TokenType::Equal,
+    TokenType::Assign,
     TokenType::Comma,
-    TokenType::Lt,
-    TokenType::Gt,
-    TokenType::Le,
-    TokenType::Ge,
-    TokenType::Eq,
-    TokenType::Ne,
+    TokenType::LessThan,
+    TokenType::GreaterThan,
+    TokenType::LessThanOrEqual,
+    TokenType::GreaterThanOrEqual,
+    TokenType::EqualTo,
+    TokenType::NotEqualTo,
     TokenType::LShift,
     TokenType::RShift,
     TokenType::BitOr,
@@ -256,68 +256,81 @@ impl Token {
 pub struct Lexer(Regex);
 
 impl Lexer {
-    pub fn new() -> Lexer {
+    pub fn new() -> Result<Lexer, Error> {
         Lexer::from_tokens(TOKENS.iter())
+            .map_err(Error::from_regex_error)
     }
 
-    fn from_tokens<'a, I>(tokens: I) -> Lexer
+    fn from_tokens<'a, I>(tokens: I) -> Result<Lexer, RegexError>
         where I: IntoIterator<Item=&'a TokenType>
     {
-        let s = tokens.into_iter()
+        let pattern = tokens.into_iter()
             .map(|tok| format!("(?P<{}>{})", tok.name(), tok.pattern()))
             .join("|");
-        Lexer(Regex::new(&s).map_err(LexerError::from_regex_error).unwrap())
+        Regex::new(&pattern)
+            .map(|r| Lexer(r))
     }
 
-    pub fn tokenise<'t>(&self, string: &'t str) -> Vec<Token> {
+    pub fn tokenise<'t>(&self, string: &'t str) -> Result<Vec<Token>, Error> {
         let mut pos = 0;
         let mut tokens = vec![];
 
         while pos != string.len() {
-            let c = self.0.captures(&string[pos..]).unwrap();
-            let token = Lexer::first_token(&c).unwrap();
+            let c = self.0.captures(&string[pos..])
+                .ok_or(Error::NoTokens)?;
+            let token = Lexer::first_token(&c)?;
+            if token.name == TokenType::Error {
+                return Err(Error::BadToken((&string[pos..]).to_string()));
+            }
+
             let len = token.string.len();
             tokens.push(token);
             pos += len;
         }
 
-        tokens
+        Ok(tokens)
     }
 
-    fn first_token(caps: &Captures) -> Result<Token, LexerError> {
+    fn first_token(caps: &Captures) -> Result<Token, Error> {
         caps.iter_named()
             .filter_map(|(n, s)| s.map(|t| (n, t)))
             .last()
             .map(Token::from_tuple)
             .map(Option::unwrap) // guaranteed to come from TOKENS
-            .ok_or(LexerError::Internal)
+            .ok_or(Error::NoTokens)
     }
 }
 
 #[derive(Debug)]
-pub enum LexerError {
+pub enum Error {
     Regex(RegexError),
-    Internal
+    NoTokens,
+    BadToken(String),
 }
 
-impl LexerError {
-    fn from_regex_error(err: RegexError) -> LexerError {
-        LexerError::Regex(err)
+impl Error {
+    fn from_regex_error(err: RegexError) -> Error {
+        Error::Regex(err)
     }
-}
 
-impl fmt::Display for LexerError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "LexerError")
-    }
-}
-
-impl Error for LexerError {
     fn description(&self) -> &str {
         match self {
-            &LexerError::Regex(ref err) => err.description(),
-            &LexerError::Internal => "LexerError",
+            &Error::Regex(ref err) => (err as &error::Error).description(),
+            &Error::NoTokens => "there are no tokens in the given string",
+            &Error::BadToken(_) => "a bad token was encountered",
         }
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:}", self.description())
+    }
+}
+
+impl error::Error for Error {
+    fn description(&self) -> &str {
+        (self as &self::Error).description()
     }
 }
 
