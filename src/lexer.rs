@@ -3,14 +3,88 @@ use regex::{Regex, Captures, Error as RegexError};
 use std::error::Error;
 use std::fmt;
 
-pub fn create_lexer_regex<'a: 'b, 'b, I>(tokens: I) -> Result<Regex, LexerError>
-    where I: Iterator<Item = &'b (&'a str, &'a str)>
-{
-	let s = tokens
-		.map(|&(k, v)| format!("(?P<{}>{})", k, v))
-		.join("|");
-    Regex::new(&s).map_err(LexerError::from_regex_error)
+pub static TOKENS: [(&'static str, &'static str); 38] = [
+    ("fn", "fn"),
+    ("let", "let"),
+    ("return", "return"),
+    ("or", "or"),
+    ("and", "and"),
+    ("not", "not"),
+    ("lbrack", r"\("),
+    ("rbrack", r"\)"),
+    ("lcurly", r"\{"),
+    ("rcurly", r"\}"),
+    ("lsqbrack", r"\["),
+    ("rsqbrack", r"\]"),
+    ("colon", r":"),
+    ("arrow", r"->"),
+    ("plus", r"\+"),
+    ("minus", r"-"),
+    ("modulus", r"%"),
+    ("times", r"×"),
+    ("divide", r"÷"),
+    ("semi", r";"),
+    ("equal", r"="),
+    ("comma", r","),
+    ("lt", r"<"),
+    ("gt", r">"),
+    ("le", r"<="),
+    ("ge", r">="),
+    ("eq", r"=="),
+    ("ne", r"!="),
+    ("lshift", r"<<"),
+    ("rshift", r">>"),
+    ("bitor", r"\|"),
+    ("bitand", r"&"),
+    ("bitxor", r"\^"),
+    ("exp", r"\*\*"),
+    ("string", r#""(\\"|[^"])*""#),
+    ("ident", "[a-zA-Z_][a-zA-Z0-9_]*"),
+    ("wspace", "[ \\n\\r\\t]*"),
+    ("ERROR", ".*?"),
+];
+
+pub struct Lexer(Regex);
+
+impl Lexer {
+    pub fn new() -> Lexer {
+        Lexer::from_tokens(TOKENS.as_ref())
+    }
+
+    pub fn from_tokens<'a: 'b, 'b, I>(tokens: I) -> Lexer
+        where I: IntoIterator<Item = &'b (&'a str, &'a str)>
+    {
+        let s = tokens.into_iter()
+            .map(|&(k, v)| format!("(?P<{}>{})", k, v))
+            .join("|");
+        Lexer(Regex::new(&s).map_err(LexerError::from_regex_error).unwrap())
+    }
+
+    pub fn tokenise<'t>(&self, string: &'t str) -> Vec<Token> {
+        let mut pos = 0;
+        let mut tokens = vec![];
+
+        while pos != string.len() {
+            let c = self.0.captures(&string[pos..]).unwrap();
+            let token = Lexer::first_token(&c).unwrap();
+            let len = token.string.len();
+            tokens.push(token);
+            pos += len;
+        }
+
+        tokens
+    }
+
+    fn first_token(caps: &Captures) -> Result<Token, LexerError> {
+        caps.iter_named()
+            .filter_map(|(n, s)| s.map(|t| (n, t)))
+            .last()
+            .map(Token::from_tuple)
+            .ok_or(LexerError::Internal)
+    }
 }
+
+
 
 #[derive(Debug, Clone)]
 pub struct Token {
@@ -20,10 +94,7 @@ pub struct Token {
 
 impl Token {
     pub fn new(name: String, string: String) -> Token {
-        Token {
-            name: name,
-            string: string,
-        }
+        Token { name: name, string: string, }
     }
 
     pub fn from_strs(name: &str, string: &str) -> Token {
@@ -60,29 +131,6 @@ impl Error for LexerError {
             &LexerError::Internal => "LexerError",
         }
     }
-}
-
-fn first_token(caps: &Captures) -> Result<Token, LexerError> {
-    caps.iter_named()
-    	.filter_map(|(n, s)| s.map(|t| (n, t)))
-        .last()
-        .map(Token::from_tuple)
-        .ok_or(LexerError::Internal)
-}
-
-pub fn tokenise<'t>(regex: &Regex, string: &'t str) -> Vec<Token> {
-    let mut pos = 0;
-    let mut tokens = vec![];
-
-    while pos != string.len() {
-        let c = regex.captures(&string[pos..]).unwrap();
-        let token = first_token(&c).unwrap();
-        let len = token.string.len();
-        tokens.push(token);
-        pos += len;
-    }
-
-    tokens
 }
 
 #[cfg(test)]
