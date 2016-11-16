@@ -1,6 +1,6 @@
 fn foo(x: int) -> int
 {
-	let y: int = x + x;
+	let y: int = x + x × x + x;
 	print("x + x =", y);
 	return y;
 }

@@ -3,54 +3,79 @@ use backtrace::Backtrace;
 use lexer::{TokenType, Token};
 
 #[derive(Debug, Clone)]
-pub struct Type;
+pub enum BuiltinType {
+    Int,
+}
+
+use self::BuiltinType::*;
+
+#[derive(Debug, Clone)]
+pub enum Type {
+    Builtin(BuiltinType),
+    Named(String),
+}
 
 impl Type {
-    fn from_string(_: String) -> Self {
-        Type
+    fn from_string(string: String) -> Self {
+        match &string as &str {
+            "int" => Type::Builtin(Int),
+            _ => Type::Named(string),
+        }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Param { name: String, typ: Type }
+pub enum Pattern {
+    Ident(String),
+}
+
+impl Pattern {
+    fn from_string(string: String) -> Self {
+        Pattern::Ident(string)
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct Param(Pattern, Type);
 
 #[derive(Debug, Clone)]
 pub enum Item {
-    Fn { name: String, params: Vec<Param>, returntype: Type, body: Vec<Stmt> },
+    Fn(String, Vec<Param>, Type, Vec<Stmt>),
 }
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    Block { stmts: Vec<Stmt> },
-    Let { pat: String, typ: Type, expr: Expr },
-    Return { expr: Expr },
-    Expr { expr: Expr }
+    Block(Vec<Stmt>),
+    Let(Pattern, Type, Expr),
+    Return(Expr),
+    Expr(Expr),
 }
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Call { expr: Box<Expr>, args: Vec<Expr> },
-    Idx { expr: Box<Expr>, subscrs: Vec<Expr> },
-    String { string: String },
-    Ident { name: String },
+    Call(Box<Expr>, Vec<Expr>),
+    Idx(Box<Expr>, Vec<Expr>),
+    String(String),
+    Ident(String),
     IfElse { expr: Box<Expr>, cond: Box<Expr>, alt: Box<Expr> },
-    UnaryPlus { expr: Box<Expr> },
-    UnaryMinus { expr: Box<Expr> },
-    UnaryTilde { expr: Box<Expr> },
-    Plus { lhs: Box<Expr>, rhs: Box<Expr> },
-    Minus { lhs: Box<Expr>, rhs: Box<Expr> },
-    Times { lhs: Box<Expr>, rhs: Box<Expr> },
-    Divide { lhs: Box<Expr>, rhs: Box<Expr> }, // should really 'divided by' or 'over'
-    Mod { lhs: Box<Expr>, rhs: Box<Expr> },
-    Power { lhs: Box<Expr>, rhs: Box<Expr> },
-    LogicalAnd { exprs: Vec<Expr> },
-    LogicalOr { exprs: Vec<Expr> },
-    LogicalNot { expr: Box<Expr> },
-    BitOr { exprs: Vec<Expr> },
-    BitXor { exprs: Vec<Expr> },
-    BitAnd { exprs: Vec<Expr> },
-    LShift { lhs: Box<Expr>, rhs: Box<Expr> },
-    RShift { lhs: Box<Expr>, rhs: Box<Expr> },
+    UnaryPlus(Box<Expr>),
+    UnaryMinus(Box<Expr>),
+    UnaryTilde(Box<Expr>),
+    Plus(Box<Expr>, Box<Expr>),
+    Minus(Box<Expr>, Box<Expr>),
+    Times(Box<Expr>, Box<Expr>),
+    Divide(Box<Expr>, Box<Expr>), // should really 'divided by' or 'over'
+    Modulus(Box<Expr>, Box<Expr>),
+    Power(Box<Expr>, Box<Expr>),
+    LogicalAnd(Vec<Expr>),
+    LogicalOr(Vec<Expr>),
+    LogicalNot(Box<Expr>),
+    BitOr(Vec<Expr>),
+    BitXor(Vec<Expr>),
+    BitAnd(Vec<Expr>),
+    LShift(Box<Expr>, Box<Expr>),
+    RShift(Box<Expr>, Box<Expr>),
 }
 
 pub struct Parser<I: Iterator<Item=Token>> {
@@ -135,19 +160,24 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         } else {
             Err(ParserError::new(WrongToken {
                 actual: self.lookahead(),
-                expected: TokenType::Ident,
+                expected: tok,
+            }))
+        }
+    }
+
+    fn expect_get(&mut self, tok: TokenType) -> Result<String> {
+        if self.lookahead().name == tok {
+            Ok(self.get_token().string)
+        } else {
+            Err(ParserError::new(WrongToken {
+                actual: self.lookahead(),
+                expected: tok,
             }))
         }
     }
 
     fn expect_ident(&mut self) -> Result<String> {
-        match self.lookahead().name {
-            TokenType::Ident => Ok(self.get_token().string),
-            _ => Err(ParserError::new(WrongToken {
-                actual: self.lookahead(),
-                expected: TokenType::Ident,
-            })),
-        }
+        self.expect_get(TokenType::Ident)
     }
 
     fn accept_mut(&mut self, tok: TokenType) -> bool {
@@ -183,7 +213,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         while !self.accept_mut(TokenType::RCurly) {
             stmts.push(self.statement()?);
         }
-        Ok(Stmt::Block { stmts: stmts })
+        Ok(Stmt::Block(stmts))
     }
 
     fn statement(&mut self) -> Result<Stmt> {
@@ -202,18 +232,13 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         let params = self.param_list()?;
         self.expect(TokenType::RBrack)?;
         self.expect(TokenType::Arrow)?;
-        let returns = self.expect_ident()?;
+        let ret_typ = self.typ()?;
         self.expect(TokenType::LCurly)?;
         let mut body = vec![];
         while !self.accept_mut(TokenType::RCurly) {
             body.push(self.statement()?);
         }
-        Ok(Item::Fn {
-            name: name,
-            params: params,
-            returntype: Type::from_string(returns),
-            body: body,
-        })
+        Ok(Item::Fn(name, params, ret_typ, body))
     }
 
     fn param_list(&mut self) -> Result<Vec<Param>> {
@@ -226,10 +251,10 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     }
 
     fn parameter(&mut self) -> Result<Param> {
-        let name = self.expect_ident()?;
+        let pat = self.pattern()?;
         self.expect(TokenType::Colon)?;
-        let typ = self.expect_ident()?;
-        Ok(Param { name: name, typ: Type::from_string(typ) })
+        let typ = self.typ()?;
+        Ok(Param(pat, typ))
     }
 
     fn let_statement(&mut self) -> Result<Stmt> {
@@ -240,15 +265,11 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         self.expect(TokenType::Assign)?;
         let expr = self.expression()?;
         self.expect(TokenType::Semi)?;
-        Ok(Stmt::Let { 
-            pat: pat, 
-            typ: typ, 
-            expr: expr,
-        })
+        Ok(Stmt::Let(pat, typ, expr))
     }
 
-    fn pattern(&mut self) -> Result<String> {
-        self.expect_ident()
+    fn pattern(&mut self) -> Result<Pattern> {
+        Ok(Pattern::from_string(self.expect_ident()?))
     }
 
     fn typ(&mut self) -> Result<Type> {
@@ -257,7 +278,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
 
     fn return_statement(&mut self) -> Result<Stmt> {
         self.expect(TokenType::Return)?;
-        let stmt = Stmt::Return { expr: self.expression()? };
+        let stmt = Stmt::Return(self.expression()?);
         self.expect(TokenType::Semi)?;
         Ok(stmt)
     }
@@ -265,7 +286,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     fn expr_statement(&mut self) -> Result<Stmt> {
         let expr = self.expression()?;
         self.expect(TokenType::Semi)?;
-        Ok(Stmt::Expr { expr: expr })
+        Ok(Stmt::Expr(expr))
     }
 
     fn expression(&mut self) -> Result<Expr> {
@@ -285,7 +306,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     }
 
     fn or_expr(&mut self) -> Result<Expr> {
-        self.op_expr(Self::and_expr, TokenType::Or, |exprs| Expr::LogicalOr { exprs: exprs })
+        self.op_expr(Self::and_expr, TokenType::Or, Expr::LogicalOr)
     }
 
     fn op_expr<F>(&mut self, next: fn (&mut Self) -> Result<Expr>, token: TokenType, make_ast_node: F) -> Result<Expr>
@@ -304,12 +325,12 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     }
 
     fn and_expr(&mut self) -> Result<Expr> {
-        self.op_expr(Self::not_expr, TokenType::And, |exprs| Expr::LogicalAnd { exprs: exprs })
+        self.op_expr(Self::not_expr, TokenType::And, Expr::LogicalAnd)
     }
 
     fn not_expr(&mut self) -> Result<Expr> {
         if self.accept_mut(TokenType::Not) {
-            self.not_expr().map(|e| Expr::LogicalNot { expr: Box::new(e) })
+            Ok(Expr::LogicalNot(Box::new(self.not_expr()?)))
         } else {
             self.comparison()
         }
@@ -324,32 +345,23 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     }
 
     fn bitor_expr(&mut self) -> Result<Expr> {
-        self.op_expr(Self::bitxor_expr, TokenType::BitOr,
-            |exprs| Expr::BitOr { exprs: exprs })
+        self.op_expr(Self::bitxor_expr, TokenType::BitOr, Expr::BitOr)
     }
 
     fn bitxor_expr(&mut self) -> Result<Expr> {
-        self.op_expr(Self::bitand_expr, TokenType::BitXor,
-            |exprs| Expr::BitXor { exprs: exprs })
+        self.op_expr(Self::bitand_expr, TokenType::BitXor, Expr::BitXor)
     }
 
     fn bitand_expr(&mut self) -> Result<Expr> {
-        self.op_expr(Self::bitshf_expr, TokenType::BitAnd,
-            |exprs| Expr::BitAnd { exprs: exprs })
+        self.op_expr(Self::bitshf_expr, TokenType::BitAnd, Expr::BitAnd)
     }
 
     fn bitshf_expr(&mut self) -> Result<Expr> {
         let expr = self.arith_expr()?;
         if self.accept_mut(TokenType::LShift) {
-            self.bitshf_expr().map(|e| Expr::LShift {
-                lhs: Box::new(expr),
-                rhs: Box::new(e)
-            })
+            Ok(Expr::LShift(Box::new(expr), Box::new(self.bitshf_expr()?)))
         } else if self.accept_mut(TokenType::RShift) {
-            self.bitshf_expr().map(|e| Expr::RShift {
-                lhs: Box::new(expr), 
-                rhs: Box::new(e)
-            })
+            Ok(Expr::RShift(Box::new(expr), Box::new(self.bitshf_expr()?)))
         } else {
             Ok(expr)
         }
@@ -358,15 +370,9 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     fn arith_expr(&mut self) -> Result<Expr> {
         let expr = self.term()?;
         if self.accept_mut(TokenType::Plus) {
-            self.arith_expr().map(|a| Expr::Plus { 
-                lhs: Box::new(expr), 
-                rhs: Box::new(a)
-            })
+            Ok(Expr::Plus(Box::new(expr), Box::new(self.arith_expr()?)))
         } else if self.accept_mut(TokenType::Minus) {
-            self.arith_expr().map(|a| Expr::Minus { 
-                lhs: Box::new(expr), 
-                rhs: Box::new(a)
-            })
+            Ok(Expr::Minus(Box::new(expr), Box::new(self.arith_expr()?)))
         } else {
             Ok(expr)
         }
@@ -375,20 +381,11 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     fn term(&mut self) -> Result<Expr> {
         let expr = self.factor()?;
         if self.accept_mut(TokenType::Times) {
-            self.arith_expr().map(|a| Expr::Times { 
-                lhs: Box::new(expr), 
-                rhs: Box::new(a)
-            })
+            Ok(Expr::Times(Box::new(expr), Box::new(self.term()?)))
         } else if self.accept_mut(TokenType::Divide) {
-            self.arith_expr().map(|a| Expr::Divide { 
-                lhs: Box::new(expr), 
-                rhs: Box::new(a)
-            })
+            Ok(Expr::Divide(Box::new(expr), Box::new(self.term()?)))
         } else if self.accept_mut(TokenType::Modulus) {
-            self.arith_expr().map(|a| Expr::Mod { 
-                lhs: Box::new(expr), 
-                rhs: Box::new(a)
-            })
+            Ok(Expr::Modulus(Box::new(expr), Box::new(self.term()?)))
         } else {
             Ok(expr)
         }
@@ -396,11 +393,11 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
 
     fn factor(&mut self) -> Result<Expr> {
         if self.accept_mut(TokenType::Plus) {
-            self.factor().map(|f| Expr::UnaryPlus { expr: Box::new(f) })
+            Ok(Expr::UnaryPlus(Box::new(self.factor()?)))
         } else if self.accept_mut(TokenType::Minus) {
-            self.factor().map(|f| Expr::UnaryMinus { expr: Box::new(f) })
+            Ok(Expr::UnaryMinus(Box::new(self.factor()?)))
         } else if self.accept_mut(TokenType::Tilde) {
-            self.factor().map(|f| Expr::UnaryTilde { expr: Box::new(f) })
+            Ok(Expr::UnaryTilde(Box::new(self.factor()?)))
         } else {
             self.power()
         }
@@ -409,7 +406,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     fn power(&mut self) -> Result<Expr> {
         let expr = self.atom_expr()?;
         if self.accept_mut(TokenType::Exp) {
-            Ok(Expr::Power { lhs: Box::new(expr), rhs: Box::new(self.factor()?) })
+            Ok(Expr::Power(Box::new(expr), Box::new(self.factor()?)))
         } else {
             Ok(expr)
         }
@@ -429,10 +426,10 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     fn call_or_idx_expr(&mut self, expr: Expr) -> Result<Expr> {
         if self.accept(TokenType::LBrack) {
             let args = self.call_trailer()?;
-            self.call_or_idx_expr(Expr::Call { expr: Box::new(expr), args: args })
+            self.call_or_idx_expr(Expr::Call(Box::new(expr), args))
         } else if self.accept(TokenType::LSqBrack) {
             let subscrs = self.idx_trailer()?;
-            self.call_or_idx_expr(Expr::Idx { expr: Box::new(expr), subscrs: subscrs })
+            self.call_or_idx_expr(Expr::Idx(Box::new(expr), subscrs))
         } else {
             Ok(expr)
         }
@@ -482,10 +479,11 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
 
     fn ident(&mut self) -> Result<Expr> {
         self.expect_ident()
-            .map(|id| Expr::Ident { name: id })
+            .map(Expr::Ident)
     }
 
     fn string(&mut self) -> Result<Expr> {
-        Ok(Expr::String { string: self.get_token().string })
+        self.expect_get(TokenType::String)
+            .map(Expr::String)
     }
 }
