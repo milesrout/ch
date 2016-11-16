@@ -7,8 +7,6 @@ pub enum BuiltinType {
     Int,
 }
 
-use self::BuiltinType::*;
-
 #[derive(Debug, Clone)]
 pub enum Type {
     Builtin(BuiltinType),
@@ -18,7 +16,7 @@ pub enum Type {
 impl Type {
     fn from_string(string: String) -> Self {
         match &string as &str {
-            "int" => Type::Builtin(Int),
+            "int" => Type::Builtin(BuiltinType::Int),
             _ => Type::Named(string),
         }
     }
@@ -41,7 +39,7 @@ pub struct Param(Pattern, Type);
 
 #[derive(Debug, Clone)]
 pub enum Item {
-    Fn(String, Vec<Param>, Type, Vec<Stmt>),
+    Fn(String, Vec<Param>, Type, Stmt),
 }
 
 #[derive(Debug, Clone)]
@@ -132,30 +130,33 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         self.expression()
     }
 
-    fn next_token(&mut self) {
-        self.current_token = match self.tokens.next() {
-            Some(t) => t,
-            None => Token::new(TokenType::Eof, String::new()),
-        }
+    #[inline]
+    fn next_token(&mut self) -> Result<()> {
+        Ok(self.current_token = self.tokens.next()
+            .ok_or(ParserError::new(TooFewTokens))?)
     }
 
+    #[inline]
     fn lookahead(&mut self) -> Token {
         self.current_token.clone()
     }
 
-    fn get_token(&mut self) -> Token {
+    #[inline]
+    fn get_token(&mut self) -> Result<Token> {
         let x = self.lookahead();
-        self.next_token();
-        x
+        self.next_token()?;
+        Ok(x)
     }
 
+    #[inline]
     fn accept(&mut self, tok: TokenType) -> bool {
         self.lookahead().name == tok
     }
 
+    #[inline]
     fn expect(&mut self, tok: TokenType) -> Result<()> {
         if self.accept(tok) {
-            self.next_token();
+            self.next_token()?;
             Ok(())
         } else {
             Err(ParserError::new(WrongToken {
@@ -165,9 +166,10 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         }
     }
 
+    #[inline]
     fn expect_get(&mut self, tok: TokenType) -> Result<String> {
         if self.lookahead().name == tok {
-            Ok(self.get_token().string)
+            Ok(self.get_token()?.string)
         } else {
             Err(ParserError::new(WrongToken {
                 actual: self.lookahead(),
@@ -176,16 +178,17 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         }
     }
 
+    #[inline]
     fn expect_ident(&mut self) -> Result<String> {
         self.expect_get(TokenType::Ident)
     }
 
-    fn accept_mut(&mut self, tok: TokenType) -> bool {
+    fn accept_mut(&mut self, tok: TokenType) -> Result<bool> {
         if self.lookahead().name == tok {
-            self.next_token();
-            true
+            self.next_token()?;
+            Ok(true)
         } else {
-            false
+            Ok(false)
         }
     }
 
@@ -210,7 +213,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     fn block(&mut self) -> Result<Stmt> {
         self.expect(TokenType::LCurly)?;
         let mut stmts = vec![];
-        while !self.accept_mut(TokenType::RCurly) {
+        while !self.accept_mut(TokenType::RCurly)? {
             stmts.push(self.statement()?);
         }
         Ok(Stmt::Block(stmts))
@@ -233,11 +236,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         self.expect(TokenType::RBrack)?;
         self.expect(TokenType::Arrow)?;
         let ret_typ = self.typ()?;
-        self.expect(TokenType::LCurly)?;
-        let mut body = vec![];
-        while !self.accept_mut(TokenType::RCurly) {
-            body.push(self.statement()?);
-        }
+        let body = self.block()?;
         Ok(Item::Fn(name, params, ret_typ, body))
     }
 
@@ -245,7 +244,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         let mut params = vec![];
         while !self.accept(TokenType::RBrack) {
             params.push(self.parameter()?);
-            self.accept_mut(TokenType::Comma);
+            self.accept_mut(TokenType::Comma)?;
         }
         Ok(params)
     }
@@ -269,11 +268,11 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     }
 
     fn pattern(&mut self) -> Result<Pattern> {
-        Ok(Pattern::from_string(self.expect_ident()?))
+        self.expect_ident().map(Pattern::from_string)
     }
 
     fn typ(&mut self) -> Result<Type> {
-        Ok(Type::from_string(self.expect_ident()?))
+        self.expect_ident().map(Type::from_string)
     }
 
     fn return_statement(&mut self) -> Result<Stmt> {
@@ -290,8 +289,12 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     }
 
     fn expression(&mut self) -> Result<Expr> {
+        self.if_else_expr()
+    }
+
+    fn if_else_expr(&mut self) -> Result<Expr> {
         let expr = self.or_expr()?;
-        Ok(if self.accept_mut(TokenType::If) {
+        Ok(if self.accept_mut(TokenType::If)? {
             let cond = self.or_expr()?;
             self.expect(TokenType::Else)?;
             let alt = self.or_expr()?;
@@ -315,7 +318,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         let expr = next(self)?;
         if self.accept(token) {
             let mut exprs = vec![];
-            while self.accept_mut(token) {
+            while self.accept_mut(token)? {
                 exprs.push(next(self)?);
             }
             Ok(make_ast_node(exprs))
@@ -329,7 +332,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     }
 
     fn not_expr(&mut self) -> Result<Expr> {
-        if self.accept_mut(TokenType::Not) {
+        if self.accept_mut(TokenType::Not)? {
             Ok(Expr::LogicalNot(Box::new(self.not_expr()?)))
         } else {
             self.comparison()
@@ -358,9 +361,9 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
 
     fn bitshf_expr(&mut self) -> Result<Expr> {
         let expr = self.arith_expr()?;
-        if self.accept_mut(TokenType::LShift) {
+        if self.accept_mut(TokenType::LShift)? {
             Ok(Expr::LShift(Box::new(expr), Box::new(self.bitshf_expr()?)))
-        } else if self.accept_mut(TokenType::RShift) {
+        } else if self.accept_mut(TokenType::RShift)? {
             Ok(Expr::RShift(Box::new(expr), Box::new(self.bitshf_expr()?)))
         } else {
             Ok(expr)
@@ -369,9 +372,9 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
 
     fn arith_expr(&mut self) -> Result<Expr> {
         let expr = self.term()?;
-        if self.accept_mut(TokenType::Plus) {
+        if self.accept_mut(TokenType::Plus)? {
             Ok(Expr::Plus(Box::new(expr), Box::new(self.arith_expr()?)))
-        } else if self.accept_mut(TokenType::Minus) {
+        } else if self.accept_mut(TokenType::Minus)? {
             Ok(Expr::Minus(Box::new(expr), Box::new(self.arith_expr()?)))
         } else {
             Ok(expr)
@@ -380,11 +383,11 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
 
     fn term(&mut self) -> Result<Expr> {
         let expr = self.factor()?;
-        if self.accept_mut(TokenType::Times) {
+        if self.accept_mut(TokenType::Times)? {
             Ok(Expr::Times(Box::new(expr), Box::new(self.term()?)))
-        } else if self.accept_mut(TokenType::Divide) {
+        } else if self.accept_mut(TokenType::Divide)? {
             Ok(Expr::Divide(Box::new(expr), Box::new(self.term()?)))
-        } else if self.accept_mut(TokenType::Modulus) {
+        } else if self.accept_mut(TokenType::Modulus)? {
             Ok(Expr::Modulus(Box::new(expr), Box::new(self.term()?)))
         } else {
             Ok(expr)
@@ -392,11 +395,11 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
     }
 
     fn factor(&mut self) -> Result<Expr> {
-        if self.accept_mut(TokenType::Plus) {
+        if self.accept_mut(TokenType::Plus)? {
             Ok(Expr::UnaryPlus(Box::new(self.factor()?)))
-        } else if self.accept_mut(TokenType::Minus) {
+        } else if self.accept_mut(TokenType::Minus)? {
             Ok(Expr::UnaryMinus(Box::new(self.factor()?)))
-        } else if self.accept_mut(TokenType::Tilde) {
+        } else if self.accept_mut(TokenType::Tilde)? {
             Ok(Expr::UnaryTilde(Box::new(self.factor()?)))
         } else {
             self.power()
@@ -405,7 +408,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
 
     fn power(&mut self) -> Result<Expr> {
         let expr = self.atom_expr()?;
-        if self.accept_mut(TokenType::Exp) {
+        if self.accept_mut(TokenType::Exp)? {
             Ok(Expr::Power(Box::new(expr), Box::new(self.factor()?)))
         } else {
             Ok(expr)
@@ -440,7 +443,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         let mut args = vec![];
         while !self.accept(TokenType::RBrack) {
             args.push(self.expression()?);
-            self.accept_mut(TokenType::Comma);
+            self.accept_mut(TokenType::Comma)?;
         }
         self.expect(TokenType::RBrack)?;
         Ok(args)

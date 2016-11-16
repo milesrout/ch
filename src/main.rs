@@ -30,9 +30,8 @@ fn main() {
         }
     }
 
-    let tokens = tokens.into_iter()
+    let tokens = tokens.clone().into_iter()
         .filter(|&Token { name: n, .. }| n != TokenType::WSpace);
     let mut parser = Parser::new(tokens).expect("Creating parser failed");
-
     println!("{:?}", parser.parse().expect("Parsing failed"));
 }

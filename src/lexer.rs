@@ -1,5 +1,6 @@
 use itertools::Itertools;
-use regex::{Regex, Captures, Error as RegexError};
+use regex;
+use regex::{Regex, Captures};
 use std::error;
 use std::fmt;
 
@@ -251,6 +252,10 @@ impl Token {
         TokenType::from_name(name)
             .map(|n| Token::new(n, string.to_string()))
     }
+
+    pub fn eof() -> Token {
+        Token::new(TokenType::Eof, String::new())
+    }
 }
 
 pub struct Lexer(Regex);
@@ -261,7 +266,7 @@ impl Lexer {
             .map_err(Error::from_regex_error)
     }
 
-    fn from_tokens<'a, I>(tokens: I) -> Result<Lexer, RegexError>
+    fn from_tokens<'a, I>(tokens: I) -> Result<Lexer, regex::Error>
         where I: IntoIterator<Item=&'a TokenType>
     {
         let pattern = tokens.into_iter()
@@ -288,6 +293,8 @@ impl Lexer {
             pos += len;
         }
 
+        tokens.push(Token::eof());
+
         Ok(tokens)
     }
 
@@ -303,13 +310,13 @@ impl Lexer {
 
 #[derive(Debug)]
 pub enum Error {
-    Regex(RegexError),
+    Regex(regex::Error),
     NoTokens,
     BadToken(String),
 }
 
 impl Error {
-    fn from_regex_error(err: RegexError) -> Error {
+    fn from_regex_error(err: regex::Error) -> Error {
         Error::Regex(err)
     }
 
