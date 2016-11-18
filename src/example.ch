@@ -9,5 +9,5 @@ fn bar(x: float, y: float) -> float
 {
 	let z: float = x ÷ y;
 	print("x ÷ y =", z);
-	return z;
+	z
 }

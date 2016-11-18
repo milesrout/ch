@@ -39,23 +39,17 @@ pub struct Param(Pattern, Type);
 
 #[derive(Debug, Clone)]
 pub enum Item {
-    Fn(String, Vec<Param>, Type, Stmt),
-}
-
-#[derive(Debug, Clone)]
-pub enum Stmt {
-    Block(Vec<Stmt>),
-    Let(Pattern, Type, Expr),
-    Return(Expr),
-    Expr(Expr),
+    Fn(String, Vec<Param>, Type, Expr),
 }
 
 #[derive(Debug, Clone)]
 pub enum Expr {
+    NullBlock(Vec<Expr>),
+    ExprBlock(Vec<Expr>, Box<Expr>),
+    Let(Pattern, Type, Box<Expr>),
+    Return(Box<Expr>),
     Call(Box<Expr>, Vec<Expr>),
     Idx(Box<Expr>, Vec<Expr>),
-    String(String),
-    Ident(String),
     IfElse { expr: Box<Expr>, cond: Box<Expr>, alt: Box<Expr> },
     UnaryPlus(Box<Expr>),
     UnaryMinus(Box<Expr>),
@@ -74,6 +68,8 @@ pub enum Expr {
     BitAnd(Vec<Expr>),
     LShift(Box<Expr>, Box<Expr>),
     RShift(Box<Expr>, Box<Expr>),
+    String(String),
+    Ident(String),
 }
 
 pub struct Parser<I: Iterator<Item=Token>> {
@@ -120,10 +116,6 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
 
     pub fn parse(&mut self) -> Result<Vec<Item>> {
         self.toplevel()
-    }
-
-    pub fn parse_stmt(&mut self) -> Result<Stmt> {
-        self.statement()
     }
 
     pub fn parse_expr(&mut self) -> Result<Expr> {
@@ -210,21 +202,28 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         }
     }
 
-    fn block(&mut self) -> Result<Stmt> {
+    fn block_expr(&mut self) -> Result<Expr> {
         self.expect(TokenType::LCurly)?;
-        let mut stmts = vec![];
-        while !self.accept_mut(TokenType::RCurly)? {
-            stmts.push(self.statement()?);
+        let mut exprs = vec![];
+        loop {
+            if self.accept_mut(TokenType::RCurly)? {
+                return Ok(Expr::NullBlock(exprs));
+            }
+            let expr = self.expression()?;
+            if self.accept_mut(TokenType::RCurly)? {
+                return Ok(Expr::ExprBlock(exprs, Box::new(expr)));
+            }
+            exprs.push(expr);
+            self.expect(TokenType::Semi)?;
         }
-        Ok(Stmt::Block(stmts))
     }
 
-    fn statement(&mut self) -> Result<Stmt> {
+    fn expression(&mut self) -> Result<Expr> {
         match self.lookahead().name {
-            TokenType::Let => self.let_statement(),
-            TokenType::Return => self.return_statement(),
-            TokenType::LCurly => self.block(),
-            _ => self.expr_statement(),
+            TokenType::Let => self.let_expr(),
+            TokenType::Return => self.return_expr(),
+            TokenType::LCurly => self.block_expr(),
+            _ => self.simple_expr(),
         }
     }
 
@@ -236,7 +235,7 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         self.expect(TokenType::RBrack)?;
         self.expect(TokenType::Arrow)?;
         let ret_typ = self.typ()?;
-        let body = self.block()?;
+        let body = self.expression()?;
         Ok(Item::Fn(name, params, ret_typ, body))
     }
 
@@ -256,15 +255,14 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         Ok(Param(pat, typ))
     }
 
-    fn let_statement(&mut self) -> Result<Stmt> {
+    fn let_expr(&mut self) -> Result<Expr> {
         self.expect(TokenType::Let)?;
         let pat = self.pattern()?;
         self.expect(TokenType::Colon)?;
         let typ = self.typ()?;
         self.expect(TokenType::Assign)?;
         let expr = self.expression()?;
-        self.expect(TokenType::Semi)?;
-        Ok(Stmt::Let(pat, typ, expr))
+        Ok(Expr::Let(pat, typ, Box::new(expr)))
     }
 
     fn pattern(&mut self) -> Result<Pattern> {
@@ -275,20 +273,13 @@ impl<I: Iterator<Item=Token> + std::fmt::Debug> Parser<I> {
         self.expect_ident().map(Type::from_string)
     }
 
-    fn return_statement(&mut self) -> Result<Stmt> {
+    fn return_expr(&mut self) -> Result<Expr> {
         self.expect(TokenType::Return)?;
-        let stmt = Stmt::Return(self.expression()?);
-        self.expect(TokenType::Semi)?;
+        let stmt = Expr::Return(Box::new(self.expression()?));
         Ok(stmt)
     }
 
-    fn expr_statement(&mut self) -> Result<Stmt> {
-        let expr = self.expression()?;
-        self.expect(TokenType::Semi)?;
-        Ok(Stmt::Expr(expr))
-    }
-
-    fn expression(&mut self) -> Result<Expr> {
+    fn simple_expr(&mut self) -> Result<Expr> {
         self.if_else_expr()
     }
 
